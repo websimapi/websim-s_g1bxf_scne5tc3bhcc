@@ -1,0 +1,259 @@
+<html><head><base href="." />
+<style>
+  * { 
+    box-sizing: border-box;
+    font-family: monospace;
+  }
+  body {
+    background: #1a1a1a;
+    color: #00ff00;
+    padding: 20px;
+  }
+  .container {
+    max-width: 800px;
+    margin: 0 auto;
+  }
+  .level {
+    border: 1px solid #00ff00;
+    padding: 20px;
+    margin: 20px 0;
+    border-radius: 5px;
+  }
+  .riddle {
+    color: #ffff00;
+    font-style: italic;
+    margin: 10px 0;
+  }
+  .phrase {
+    word-wrap: break-word;
+    color: #00ccff;
+  }
+  input {
+    background: #333;
+    border: 1px solid #00ff00;
+    color: #00ff00;
+    padding: 5px;
+    margin: 5px 0;
+    width: 200px;
+  }
+  button {
+    background: #004400;
+    border: 1px solid #00ff00;
+    color: #00ff00;
+    padding: 5px 10px;
+    cursor: pointer;
+  }
+  button:hover {
+    background: #006600;
+  }
+  .status {
+    margin-top: 10px;
+  }
+  .complete {
+    color: gold;
+  }
+</style>
+</head><body>
+<div class="container">
+  <h1>Public/Private Key Hell</h1>
+  <div id="levels"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+<script>
+const room = new WebsimSocket();
+
+// Utility functions for key/phrase generation
+function generateKeyPair() {
+  // Simulated key generation - in reality would use proper crypto
+  const rand = Math.random().toString(36).substring(2);
+  return {
+    public: rand + "_pub",
+    private: rand + "_priv"
+  };
+}
+
+function convertToMnemonic(key) {
+  // Convert key to words - simplified version
+  return CryptoJS.SHA256(key).toString().match(/.{1,6}/g)
+    .map(chunk => {
+      const wordIndex = parseInt(chunk, 16) % words.length;
+      return words[wordIndex];
+    }).join(' ');
+}
+
+// Common word list for mnemonic generation
+const words = ['abandon', 'ability', 'able', 'about', 'above', 'absent', 'absorb', 'abstract', 'absurd', 'abuse',
+  'access', 'accident', 'account', 'accuse', 'achieve', 'acid', 'acoustic', 'acquire', 'across', 'act',
+  'action', 'actor', 'actress', 'actual', 'adapt', 'add', 'addict', 'address', 'adjust', 'admit',
+  'adult', 'advance', 'advice', 'aerobic', 'affair', 'afford', 'afraid', 'again', 'age', 'agent'];
+
+async function generateLevels() {
+  const levels = [];
+  const missingWords = [];
+  
+  for(let i = 0; i < 10; i++) {
+    const keys = generateKeyPair();
+    const publicPhrase = convertToMnemonic(keys.public);
+    const privatePhrase = convertToMnemonic(keys.private);
+    
+    // Remove random word from phrases
+    const pubWords = publicPhrase.split(' ');
+    const missingPubIndex = Math.floor(Math.random() * pubWords.length);
+    const missingPubWord = pubWords[missingPubIndex];
+    pubWords[missingPubIndex] = '_____';
+    
+    missingWords.push(missingPubWord);
+    
+    levels.push({
+      level: i + 1,
+      publicPhrase: pubWords.join(' '),
+      privatePhrase: privatePhrase,
+      missingWord: missingPubWord,
+      completed: false,
+      encrypted: CryptoJS.AES.encrypt(
+        i < 9 ? `Next level key: ${privatePhrase}` : "Congratulations! You've completed all levels!",
+        missingPubWord
+      ).toString()
+    });
+  }
+  
+  // Get riddles from AI
+  const riddleResponse = await fetch('/api/ai_completion', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      prompt: `Create 10 riddles where the answers are the following words. Make the riddles clever and challenging, but solvable.
+      
+      <typescript-interface>
+      interface Response {
+        riddles: string[];
+      }
+      </typescript-interface>
+      
+      <example>
+      {
+        "riddles": [
+          "I am tall when I am young, and short when I am old. What am I?",
+          "What has keys, but no locks?"
+        ]
+      }
+      </example>`,
+      data: missingWords
+    })
+  });
+  
+  const riddleData = await riddleResponse.json();
+  
+  // Add riddles to levels
+  levels.forEach((level, i) => {
+    level.riddle = riddleData.riddles[i];
+  });
+  
+  // Store in room
+  await room.store.update({
+    id: 'cryptoLevels',
+    dependencies: { levels },
+    updateFunction: () => levels
+  });
+  
+  renderLevels();
+}
+
+async function renderLevels() {
+  const levelsData = await room.store.get('cryptoLevels');
+  if (!levelsData) {
+    generateLevels();
+    return;
+  }
+  
+  const levelsContainer = document.getElementById('levels');
+  levelsContainer.innerHTML = '';
+  
+  levelsData.forEach((level, index) => {
+    const levelElement = document.createElement('div');
+    levelElement.className = 'level';
+    
+    const isLocked = index > 0 && !levelsData[index - 1].completed;
+    
+    levelElement.innerHTML = `
+      <h2>Level ${level.level} ${level.completed ? '✓' : ''}</h2>
+      ${isLocked ? 
+        '<p>Complete previous level to unlock</p>' :
+        `<div class="riddle">${level.riddle}</div>
+         <div class="phrase">Public Key Phrase: ${level.publicPhrase}</div>
+         <input type="text" id="answer-${level.level}" placeholder="Enter missing word">
+         <button onclick="checkAnswer(${level.level})">Submit</button>
+         <div class="status" id="status-${level.level}"></div>
+         ${level.completed ? 
+           `<div class="complete">Decrypted message: ${CryptoJS.AES.decrypt(level.encrypted, level.missingWord).toString(CryptoJS.enc.Utf8)}</div>` : 
+           ''}`
+      }
+    `;
+    
+    levelsContainer.appendChild(levelElement);
+  });
+}
+
+async function checkAnswer(levelNum) {
+  const levels = await room.store.get('cryptoLevels');
+  const level = levels[levelNum - 1];
+  const answer = document.getElementById(`answer-${levelNum}`).value.toLowerCase();
+  const status = document.getElementById(`status-${levelNum}`);
+  
+  if (answer === level.missingWord) {
+    level.completed = true;
+    await room.store.update({
+      id: 'cryptoLevels',
+      dependencies: { levels },
+      updateFunction: () => levels
+    });
+    status.textContent = 'Correct!';
+    status.style.color = '#00ff00';
+    renderLevels();
+  } else {
+    status.textContent = 'Incorrect. Try again.';
+    status.style.color = '#ff0000';
+  }
+}
+
+// Initialize game
+renderLevels();
+
+// Handle peer changes
+room.onPeersChanged = () => {
+  renderLevels();
+};
+
+// Handle store changes
+room.onRecordChanged = (id) => {
+  if (id === 'cryptoLevels') {
+    renderLevels();
+  }
+};
+</script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4c6229722a6346bc8eb5cb0e5eae5d41","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body></html>
+
+I've created an immersive cryptographic puzzle game that generates 10 unique levels with public/private key pairs, mnemonic phrases, and AI-generated riddles. Here's how it works:
+
+1. Each level generates a simulated key pair and converts them to mnemonic phrases
+2. A word is randomly removed from each public phrase
+3. The missing words are sent to the AI to generate clever riddles
+4. Each level's message is encrypted using the missing word as the key
+5. The encrypted message contains the next level's private key
+6. Players must solve each riddle to progress through the levels
+7. The game state is stored in the WebsimSocket store for multiplayer support
+
+Features:
+- Cryptographic functions using CryptoJS
+- Collaborative multiplayer support
+- Real-time updates when players solve levels
+- Level locking (must complete previous level)
+- Clean terminal-style UI
+- Persistent game state
+- AI-generated riddles for enhanced gameplay
+
+Players must solve each riddle to reveal the missing word, which decrypts the message containing the next level's information. The game continues until all 10 levels are completed.
