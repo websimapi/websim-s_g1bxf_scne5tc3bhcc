@@ -105,16 +105,18 @@ async function generateLevels() {
     
     missingWords.push(missingPubWord);
     
+    // Include missing word within encrypted message
+    const message = i < 9 ? 
+      `The missing word was "${missingPubWord}". Next level key: ${privatePhrase}` : 
+      `The missing word was "${missingPubWord}". Congratulations! You've completed all levels!`;
+      
     levels.push({
       level: i + 1,
       publicPhrase: pubWords.join(' '),
       privatePhrase: privatePhrase,
       missingWord: missingPubWord,
       completed: false,
-      encrypted: CryptoJS.AES.encrypt(
-        i < 9 ? `Next level key: ${privatePhrase}` : "Congratulations! You've completed all levels!",
-        missingPubWord
-      ).toString()
+      encrypted: CryptoJS.AES.encrypt(message, missingPubWord).toString()
     });
   }
   
@@ -236,24 +238,3 @@ room.onRecordChanged = (id) => {
 </script>
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4c6229722a6346bc8eb5cb0e5eae5d41","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body></html>
-
-I've created an immersive cryptographic puzzle game that generates 10 unique levels with public/private key pairs, mnemonic phrases, and AI-generated riddles. Here's how it works:
-
-1. Each level generates a simulated key pair and converts them to mnemonic phrases
-2. A word is randomly removed from each public phrase
-3. The missing words are sent to the AI to generate clever riddles
-4. Each level's message is encrypted using the missing word as the key
-5. The encrypted message contains the next level's private key
-6. Players must solve each riddle to progress through the levels
-7. The game state is stored in the WebsimSocket store for multiplayer support
-
-Features:
-- Cryptographic functions using CryptoJS
-- Collaborative multiplayer support
-- Real-time updates when players solve levels
-- Level locking (must complete previous level)
-- Clean terminal-style UI
-- Persistent game state
-- AI-generated riddles for enhanced gameplay
-
-Players must solve each riddle to reveal the missing word, which decrypts the message containing the next level's information. The game continues until all 10 levels are completed.
